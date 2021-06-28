@@ -20,13 +20,7 @@ class TftpServer
     Socket controlSocket = null;
     Socket dataSocket = null;
     int port = 9999;
-
-    private int timeout = -1;
-
-    public TftpServer()
-    {
-        // port = 70;
-    }
+    private int Timeout = 5000;
 
 
     public void run()
@@ -46,7 +40,7 @@ class TftpServer
             int clientport = ((IPEndPoint)remote).Port;
 
             byte[] rec2 = new byte[512];
-            // Avaa uusi socketti
+            // Luo uusi soketti satunnaisesta portista tiedonsiirtoon
             var rand = new Random();
             int dataPort = rand.Next(5000, 60000);
             IPEndPoint iep2 = new IPEndPoint(IPAddress.Loopback, dataPort);
@@ -60,7 +54,7 @@ class TftpServer
 
             (reqType, fileName) = getRequestTypeAndFileName(request);
 
-            dataSocket.ReceiveTimeout = timeout;
+            dataSocket.ReceiveTimeout = Timeout;
 
             switch (reqType)
             {
@@ -145,7 +139,7 @@ class TftpServer
                     catch (SocketException e)
                     {
                         // Time Out soketin lukemisessa
-                        System.Console.WriteLine("Time out");
+                        System.Console.WriteLine("Time out {0}", e);
                     }
 
                     if (sendAttempt > 4)
@@ -171,7 +165,6 @@ class TftpServer
         {
             s.Close();
         }
-
     }
 
 
@@ -183,7 +176,7 @@ class TftpServer
         //    ----------------------------------
         // RFC: The data field is from zero to 512 bytes long
 
-        byte blockNumber = 1;
+        int blockNumber = 1;
         byte[] packet;
 
         using (FileStream fs = File.OpenRead(fileName))
@@ -198,13 +191,22 @@ class TftpServer
                 do
                 {
                     attempts++;
-                    // Odota ACK-viestiä
+
+                    // Tahallinen virhe
+                    // if (blockNumber == 200 && attempts < 3)
+                    //     System.Console.WriteLine("Tahallinen virhe");
+                    // else
                     sendPacket(s, ep, packet);
+
+                    // Odota ACK-viestiä
                     ACKReceived = waitACKfor(packet, s, ep);
-                } while (!ACKReceived || attempts > 5);
+                } while (!ACKReceived && attempts < 5);
 
-
-                // TODO: Jos yritykset enemmän kuin 5 niin keskeytä koko touhulle
+                if (attempts > 4)
+                {
+                    System.Console.WriteLine("Tiedostoa ei voitu lähettää");
+                    break;
+                }
 
             } while (packet.Length > 515);
         }
@@ -241,6 +243,8 @@ class TftpServer
     }
 
 
+    // Metodi odottaa ACK-viestiä paketille. ACKia odotetaan määritetyn 
+    // Timeout-ajan verran. 
     private bool waitACKfor(byte[] forPacket, Socket socket, EndPoint ep)
     {
         //           2 bytes    2 bytes
@@ -248,30 +252,35 @@ class TftpServer
         //    ACK   | 04    |   Block #  |
         //           --------------------
 
+        // Asetetaan sokettiin Timeout arvo.
+        socket.ReceiveTimeout = Timeout;
+        DateTime deadline = DateTime.Now.AddMilliseconds(Timeout);
         byte[] rec = new byte[512];
         try
         {
-            int received = 0;
-            received = socket.ReceiveFrom(rec, ref ep);
-            if (received < 4)
+            while (true)
             {
-                System.Console.WriteLine("Liian pieni ACK paketiksi");
-            }
+                int received = 0;
+                received = socket.ReceiveFrom(rec, ref ep);
 
-            // ACK-koodin ja block-numeron tarkastaminen
-            if (Packet.isACKFor(rec, forPacket))
-            {
-                return true;
-            }
+                // ACK-koodin ja block-numeron tarkastaminen
+                if (Packet.isACKFor(rec, forPacket))
+                {
+                    return true;
+                }
 
+                // Jos saatu paketti ei ollutkaan oikea ACK, niin lasketaan 
+                // soketille uusi timeout-arvo vähentämällä oletus 
+                // Timeout-arvosta odottamiseen jo käytetty aika.
+                socket.ReceiveTimeout = (int)(deadline - DateTime.Now).TotalMilliseconds;
+            }
         }
         catch (SocketException e)
         {
-            System.Console.WriteLine("Time out");
+            System.Console.WriteLine("Time out {0}", e);
         }
 
         return false;
-
     }
 }
 
@@ -300,9 +309,11 @@ class Packet
     }
 
 
-    static public bool isACKFor(byte[] AckPacket, byte[] AckForPacket)
+    static public bool isACKFor(byte[] AckPacket, byte[] ForPacket)
     {
-        return (AckPacket[1] == 4 && AckPacket[2] == AckForPacket[2] && AckPacket[3] == AckForPacket[3]);
+        if (AckPacket.Length < 4)
+            return false;
+        return (AckPacket[1] == 4 && AckPacket[2] == ForPacket[2] && AckPacket[3] == ForPacket[3]);
     }
 
 

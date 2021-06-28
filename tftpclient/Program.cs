@@ -3,34 +3,47 @@ using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Diagnostics;
 
 class Program
 {
     static void Main(string[] args)
     {
-        // try
-        // {
-        //     File.Delete(@"alice.txt");
-        // }
-        // catch (System.Exception)
-        // {
-
-        //     throw;
-        // }
-        TftpClient client = new TftpClient();
-        // client.getFile("192.168.1.2", 9999, "alice.txt");
-
+        deleteAndGet("alice.txt");
+        // uploadFile("alice3.txt");
         // client.getFile("192.168.1.181", 69, "alice.txt");
-        client.sendFile("192.168.1.2", 9999, "alice3.txt");
+        // client.sendFile("192.168.1.2", 9999, "alice3.txt");
+    }
+
+
+    private static void deleteAndGet(string fileName)
+    {
+        Debug.Write("JEEE");
+        try
+        {
+            File.Delete(@fileName);
+        }
+        catch (System.Exception)
+        {
+
+            throw;
+        }
+
+        TftpClient client = new TftpClient();
+        client.getFile("192.168.1.2", 9999, fileName);
+    }
+
+
+    private static void uploadFile(string fileName)
+    {
+        TftpClient client = new TftpClient();
+        client.sendFile("192.168.1.2", 9999, fileName);
     }
 }
 
 class TftpClient
 {
-
-    private Socket s = null;
-    private EndPoint remote = null;
-    private const int Timeout = -1; // Timeout aika vastauksen odottamiselle
+    private const int Timeout = 5000; // Timeout aika vastauksen odottamiselle
     private const int MaxRetries = 5; // Kuinka monta kertaa paketti yritetään lähettää  
 
 
@@ -55,14 +68,16 @@ class TftpClient
 
     public void getFile(string server, int port, string fileName)
     {
+        Socket s = null;
+
         try
         {
             EndPoint ep = null;
             Packet p = new Packet();
             int blockNumber = 1;
-
             (s, ep) = createSocket(server, port);
-            // Lähetä lukupyyntö
+
+            // Luo ja lähetä lukupyyntö
             byte[] PacketToSend = Packet.createRequest(fileName, "RRQ");
             s.SendTo(PacketToSend, ep);
 
@@ -70,11 +85,12 @@ class TftpClient
 
             byte[] response = new byte[516];
             IPEndPoint client = new IPEndPoint(IPAddress.Any, 0);
-            remote = (EndPoint)client;
+            EndPoint remote = (EndPoint)client;
 
             s.ReceiveTimeout = Timeout;
             int bytesGot = 0;
             int sendAttempt = 0;
+            int errorCount = 0;
 
             bool lastPacketReceived = false;
             using (FileStream fs = File.OpenWrite(fileName))
@@ -92,7 +108,7 @@ class TftpClient
                     {
                         bytesGot = s.ReceiveFrom(response, ref remote);
 
-                        // Jos data-paketti on oikeanlainen
+                        // Tarkistetaan, että paketti on oikea
                         if (Packet.dataPacketIsCorrect(response, blockNumber))
                         {
                             blockNumber++;
@@ -106,18 +122,19 @@ class TftpClient
                         }
                         else
                         {
-                            System.Console.WriteLine("Virhe BlockNumberissa");
+                            System.Console.WriteLine("Virhe BlockNumberissa {0}", blockNumber);
                         }
                     }
                     catch (SocketException e)
                     {
                         // Time Out soketin lukemisessa
-                        System.Console.WriteLine("Time out");
+                        System.Console.WriteLine("Time out {0}", e);
+                        errorCount++;
                     }
 
-                    if (sendAttempt > 4)
+                    if (sendAttempt > MaxRetries)
                     {
-                        System.Console.WriteLine("Oikeaa pakettia ei saatu 5 yrityksellä");
+                        System.Console.WriteLine("Oikeaa pakettia ei saatu {0} yrityksellä", MaxRetries);
                         break;
                     }
 
@@ -128,7 +145,8 @@ class TftpClient
                 } while (!lastPacketReceived);
             }
 
-            System.Console.WriteLine("Paketteja saatu: {0}", blockNumber);
+            Console.WriteLine("Paketteja saatu: {0}", blockNumber);
+            Console.WriteLine("Virheitä tapahtui: {0}", errorCount);
         }
         catch (System.Exception)
         {
@@ -143,6 +161,8 @@ class TftpClient
 
     public void sendFile(string server, int port, string fileName)
     {
+        Socket s;
+
         EndPoint ep = null;
         Packet p = new Packet();
         int blockNumber = 1;
@@ -153,7 +173,7 @@ class TftpClient
 
         byte[] response = new byte[516];
         IPEndPoint client = new IPEndPoint(IPAddress.Any, 0);
-        remote = (EndPoint)client;
+        EndPoint remote = (EndPoint)client;
         int count = 0;
 
         count = s.ReceiveFrom(response, ref remote);
@@ -186,10 +206,11 @@ class TftpClient
 
             } while (packet.Length > 515);
         }
-
     }
 
 
+    // Metodi odottaa ACK-viestiä paketille. ACKia odotetaan määritetyn 
+    // Timeout-ajan verran. 
     private bool waitACKfor(byte[] forPacket, Socket socket, EndPoint ep)
     {
         //           2 bytes    2 bytes
@@ -197,37 +218,35 @@ class TftpClient
         //    ACK   | 04    |   Block #  |
         //           --------------------
 
+        // Asetetaan sokettiin Timeout arvo.
+        socket.ReceiveTimeout = Timeout;
+        DateTime deadline = DateTime.Now.AddMilliseconds(Timeout);
         byte[] rec = new byte[512];
         try
         {
-            int received = 0;
-            received = socket.ReceiveFrom(rec, ref ep);
-            if (received < 4)
+            while (true)
             {
-                // Liian pieni ACK paketiksi
-                return false;
-            }
+                int received = 0;
+                received = socket.ReceiveFrom(rec, ref ep);
 
-            // ACK-koodin ja block-numeron tarkastaminen
-            if (Packet.isACKFor(rec, forPacket))
-            {
-                return true;
-            }
+                // ACK-koodin ja block-numeron tarkastaminen
+                if (Packet.isACKFor(rec, forPacket))
+                {
+                    return true;
+                }
 
+                // Jos saatu paketti ei ollutkaan oikea ACK, niin lasketaan 
+                // soketille uusi timeout-arvo vähentämällä oletus 
+                // Timeout-arvosta odottamiseen jo käytetty aika.
+                socket.ReceiveTimeout = (int)(deadline - DateTime.Now).TotalMilliseconds;
+            }
         }
         catch (SocketException e)
         {
-            System.Console.WriteLine("Time out");
+            System.Console.WriteLine("Time out {0}", e);
         }
 
         return false;
-    }
-
-
-    private void waitAck(Socket socket, EndPoint ep)
-    {
-        byte[] rec = new byte[512];
-        int received = socket.ReceiveFrom(rec, ref ep);
     }
 }
 
@@ -282,12 +301,6 @@ class Packet
     }
 
 
-    static public bool isACKFor(byte[] AckPacket, byte[] AckForPacket)
-    {
-        return (AckPacket[1] == 4 && AckPacket[2] == AckForPacket[2] && AckPacket[3] == AckForPacket[3]);
-    }
-
-
     // Tekee ACK-viestin annetulle paketille
     static public byte[] createACKForPacket(byte[] packet)
     {
@@ -299,7 +312,15 @@ class Packet
     }
 
 
-    // Tarkistaa, että saatu paketti on dataa ja sen bock-numero on oikea
+    static public bool isACKFor(byte[] AckPacket, byte[] ForPacket)
+    {
+        if (AckPacket.Length < 4)
+            return false;
+        return (AckPacket[1] == 4 && AckPacket[2] == ForPacket[2] && AckPacket[3] == ForPacket[3]);
+    }
+
+
+    // Tarkistaa, että saatu paketti on dataa ja sen block-numero on oikea
     static public bool dataPacketIsCorrect(byte[] packet, int blockNumber)
     {
         if (packet[1] != 3)
@@ -334,18 +355,6 @@ class Packet
         Buffer.BlockCopy(fileBuffer, 0, packet, 4, bytesReadFromFile);
 
         return packet;
-    }
-
-
-    static public bool ACKIsCorrectFor(byte[] packet, int blockNumber)
-    {
-        if (packet[1] != 4)
-        {
-            return false;
-        }
-
-        int ackFor = packet[2] * 256 + packet[3];
-        return (ackFor == blockNumber);
     }
 
 }
