@@ -298,7 +298,7 @@ class Packet
     }
 
 
-    // Tekee ACK-viestin annetulle paketille
+    // Luo ACK-viestin annetulle paketille
     static public byte[] createACKForPacket(byte[] packet)
     {
         byte[] ack = new byte[4];
@@ -309,28 +309,29 @@ class Packet
     }
 
 
+    // Tarkistaa onko AckPacket ACK-viesti forPacketille. 
     static public bool isACKFor(byte[] AckPacket, byte[] ForPacket)
     {
         if (AckPacket.Length < 4)
             return false;
-        return (AckPacket[1] == 4 && AckPacket[2] == ForPacket[2] && AckPacket[3] == ForPacket[3]);
+
+        return (AckPacket[1] == 4 &&
+                AckPacket[2] == ForPacket[2] &&
+                AckPacket[3] == ForPacket[3]);
     }
 
 
+    // Luo annetusta FileStreamista data-paketin
     static public byte[] createDataPacket(FileStream fileStream, int blockNumber)
     {
         // Luodaan byte-taulukot headerille ja datalle ja yhdistetääŋ
-        // ne yhdeksi lähetettäväksi byte arrayksi.
-        // Silmukkaa toistetaan kunnes tiedosto on lopussa ja siitä
-        // lukemalla saadaan alle 512 tavua.
+        // ne yhdeksi lähetettäväksi byte-taulukoksi.
         byte[] fileBuffer = new byte[512];
         // Headerin koko on 4 tavua
         byte[] header = new byte[4];
         header[1] = 3;
-
         header[2] = (byte)(blockNumber / 256);
         header[3] = (byte)(blockNumber % 256);
-        blockNumber++;
 
         int bytesReadFromFile = fileStream.Read(fileBuffer, 0, fileBuffer.Length);
 
@@ -342,15 +343,16 @@ class Packet
     }
 
 
+    // Tarkistaa, että saatu paketti on dataa ja sen block-numero on oikea
     static public bool dataPacketIsCorrect(byte[] packet, int blockNumber)
     {
-        if (packet[1] != 3)
-        {
+        if (packet.Length < 4)
             return false;
-        }
+
+        if (packet[1] != 3)
+            return false;
 
         int ackFor = packet[2] * 256 + packet[3];
         return (ackFor == blockNumber);
     }
-
 }
