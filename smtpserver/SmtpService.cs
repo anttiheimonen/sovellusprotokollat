@@ -173,7 +173,7 @@ public class SmtpProcess
         switch (req)
         {
             case SmtpRequestType.Helo:
-                return (SmtpProcessState.Helo, "250 localhost here, hi there");
+                return (SmtpProcessState.Helo, "250 localhost here, hi there " + data);
             default:
                 return (SmtpProcessState.Connected, "500 command unrecognizable");
         }
@@ -283,6 +283,15 @@ public class SmtpProcess
             data = split[1];
         else
             data = String.Empty;
+
+        if(split[0].Trim().StartsWith("HELO")){
+            if (split[0].Length > 5)
+            {
+                int nameLenght = split[0].Length - 5;
+                data = split[0].Substring(5, nameLenght);
+                split[0] = "HELO";
+            }
+        }
 
         switch (split[0])
         {
