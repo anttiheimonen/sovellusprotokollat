@@ -7,18 +7,20 @@ using System.Diagnostics;
 
 class Program
 {
+    static int portNumer = 69;
+    static string server = "127.0.0.1";
+    static string fileName = "alice.txt";
+
+
     static void Main(string[] args)
     {
-        deleteAndGet("alice.txt");
-        // uploadFile("alice3.txt");
-        // client.getFile("192.168.1.181", 69, "alice.txt");
-        // client.sendFile("192.168.1.2", 9999, "alice3.txt");
+        uploadFile();
+        // deleteAndGet();
     }
 
 
-    private static void deleteAndGet(string fileName)
+    private static void deleteAndGet()
     {
-        Debug.Write("JEEE");
         try
         {
             File.Delete(@fileName);
@@ -30,14 +32,14 @@ class Program
         }
 
         TftpClient client = new TftpClient();
-        client.getFile("192.168.1.2", 9999, fileName);
+        client.getFile(server, portNumer, fileName);
     }
 
 
-    private static void uploadFile(string fileName)
+    private static void uploadFile()
     {
         TftpClient client = new TftpClient();
-        client.sendFile("192.168.1.2", 9999, fileName);
+        client.sendFile(server, portNumer, fileName);
     }
 }
 

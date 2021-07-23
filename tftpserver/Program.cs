@@ -19,7 +19,7 @@ class TftpServer
 {
     Socket controlSocket = null;
     Socket dataSocket = null;
-    int port = 9999;
+    int port = 69;
     private int Timeout = 5000;
 
 
